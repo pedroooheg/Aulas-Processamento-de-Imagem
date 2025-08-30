@@ -1,74 +1,220 @@
 import FreeSimpleGUI as sg
 from PIL import Image, ExifTags
 import io
-from PIL.ExifTags import Base
+import os
 import webbrowser
+import requests
 
-image_original = None
+image_atual = None
+image_path = None
+imagem_anterior= None
 
-def resize_image(image_path):
-    img =  Image.open(file_path)
-    global image_original
-    image_original = img
-    img = img.resize((800,600), Image.Resampling.LANCZOS)
-    return img 
 
-def converter_coordenada(image_path):
-          dados = image_path.getexif()
-          lat = dados.get_ifd(ExifTags.IFD.GPSInfo)[2]
-          horas_lat = lat[0]
-          minutos_lat = lat[1]
-          segundos_lat = lat[2]
-          lon = dados.get_ifd(ExifTags.IFD.GPSInfo)[4]
-          horas_lon = lon[0]
-          minutos_lon = lon[1]
-          segundos_lon = lon[2]
-          latitude = (horas_lat + minutos_lat/60 + segundos_lat/3600)
-          longitude = (horas_lon + minutos_lon/60 + segundos_lon/3600)* -1
+def sepia():
+    global image_atual
+    imagem = image_atual.load()
+    largura, altura = image_atual.size
+    formato = image_atual.format.upper()
+    print(formato)
+    if formato == "JPG" or formato == "JPEG":
+        for h in range(altura):
+            for w in range(largura):
+                color = image_atual.getpixel((w, h))
+                r = (color[0] + 150 if color[0] + 150 < 255 else 255)
+                g = (color[1] + 100 if color[1] + 100 < 255 else 255)
+                b = (color[2] + 50 if color[2] + 50 < 255 else 255)
+                imagem[w, h] = (r, g, b)
+            
+        show_image()            
+    if formato == "PNG":
+        for h in range(altura):
+            for w in range(largura):
+                color = image_atual.getpixel((w, h))
+                r = (color[0] + 150 if color[0] + 150 < 255 else 255)
+                g = (color[1] + 100 if color[1] + 100 < 255 else 255)
+                b = (color[2] + 50 if color[2] + 50 < 255 else 255)
+                imagem[w, h] = (r, g, b)
+            
+        show_image()
     
-          if dados.get_ifd(ExifTags.IFD.GPSInfo)[3] == "W":
-              longitude = (horas_lon + minutos_lon/60 + segundos_lon/3600)* -1
-          url = "https://www.google.com/maps?q=" + str(float(latitude)) +","+ str(float(longitude))
-          return(url)
-    
 
 
+def negativo():
+    global image_atual
+    imagem = image_atual.load()
+    largura, altura = image_atual.size
+    formato = image_atual.format.upper()
+    print(formato)
+    if formato == "JPG" or formato == "JPEG":
+        for h in range(altura):
+            for w in range(largura):
+                color = image_atual.getpixel((w, h))
+                imagem[w, h] = (255 - color[0], 255 - color[1], 255 - color[2])
+        show_image()            
+    if formato == "PNG":
+        for h in range(altura):
+            for w in range(largura):
+                color = image_atual.getpixel((w, h))
+                imagem[w, h] = (255 - color[0], 255 - color[1], 255 - color[2])
+        show_image()
 
+def url_download(url):
+    global image_atual
+    try:
+        r = requests.get(url, stream=True)
+        if r.status_code == 200:
+            image_atual = Image.open(io.BytesIO(r.content))
+            show_image()
+        else:
+            sg.popup("Falha ao baixar a imagem. Verifique a URL e tente novamente.")
+    except Exception as e:
+        sg.popup(f"Erro ao baixar a imagem: {str(e)}")
 
-layout  =[ [sg.Menu([["Arquivo",["abrir", "fechar"]]
-                     ,["Ajuda",["sobre"]],
-                     ["EXIF",["Mostrar dados da Imagem","Mostrar dados de GPS"]]
-                     ])],
-            [sg.Image(key= '-IMAGE-', size = (800,600))]
-        ]
+def show_image():
+    global image_atual
+    try:
+        resized_img = resize_image(image_atual)
+        img_bytes = io.BytesIO()
+        resized_img.save(img_bytes, format='PNG')
+        window['-IMAGE-'].update(data=img_bytes.getvalue())
+    except Exception as e:
+        sg.popup(f"Erro ao exibir a imagem: {str(e)}")
 
+def resize_image(img):
+    try:
+        img = img.resize((800, 600), Image.Resampling.LANCZOS) 
+        return img
+    except Exception as e:
+        sg.popup(f"Erro ao redimensionar a imagem: {str(e)}")
 
-window = sg.Window("Olá mundo", layout, resizable= True)
+def open_image(filename):
+    global image_atual
+    global image_path
+    try:
+        image_path = filename
+        image_atual = Image.open(filename)    
+        show_image()
+    except Exception as e:
+        sg.popup(f"Erro ao abrir a imagem: {str(e)}")
 
+def save_image(filename):
+    global image_atual
+    try:
+        if image_atual:
+            with open(filename, 'wb') as file:
+                image_atual.save(file)
+        else:
+            sg.popup("Nenhuma imagem aberta.")
+    except Exception as e:
+        sg.popup(f"Erro ao salvar a imagem: {str(e)}")
+
+def info_image():
+    global image_atual
+    global image_path
+    try:
+        if image_atual:
+            largura, altura = image_atual.size
+            formato = image_atual.format
+            tamanho_bytes = os.path.getsize(image_path)
+            tamanho_mb = tamanho_bytes / (1024 * 1024)
+            sg.popup(f"Tamanho: {largura} x {altura}\nFormato: {formato}\nTamanho em MB: {tamanho_mb:.2f}")
+        else:
+            sg.popup("Nenhuma imagem aberta.")
+    except Exception as e:
+        sg.popup(f"Erro ao exibir informações da imagem: {str(e)}")
+
+def exif_data():
+    global image_atual
+    try:
+        if image_atual:
+            exif = image_atual._getexif() 
+            if exif:
+                exif_data = ""
+                for tag, value in exif.items():
+                    if tag in ExifTags.TAGS:
+                        if tag == 37500 or tag == 34853: #Remove os dados customizados (37500) e de GPS (34853)
+                            continue
+                        tag_name = ExifTags.TAGS[tag]
+                        exif_data += f"{tag_name}: {value}\n"
+                sg.popup("Dados EXIF:", exif_data)
+            else:
+                sg.popup("A imagem não possui dados EXIF.")
+        else:
+            sg.popup("Nenhuma imagem aberta.")
+    except Exception as e:
+        sg.popup(f"Erro ao ler dados EXIF: {str(e)}")
+
+def gps_data():
+    global image_atual
+    try:
+        if image_atual:
+            exif = image_atual._getexif()
+            if exif:
+                gps_info = exif.get(34853)  #Tag para informações de GPS
+                print (gps_info[1], gps_info[3])
+                if gps_info:
+                    latitude = int(gps_info[2][0]) + int(gps_info[2][1]) / 60 + int(gps_info[2][2]) / 3600
+                    if gps_info[1] == 'S':  #Verifica se a direção é 'S' (sul)
+                        latitude = -latitude
+                    longitude = int(gps_info[4][0]) + int(gps_info[4][1]) / 60 + int(gps_info[4][2]) / 3600
+                    if gps_info[3] == 'W':  #Verifica se a direção é 'W' (oeste)
+                        longitude = -longitude
+                    sg.popup(f"Latitude: {latitude:.6f}\nLongitude: {longitude:.6f}")
+                    open_in_maps_url = f"https://www.google.com/maps?q={latitude},{longitude}"
+                    if sg.popup_yes_no("Deseja abrir no Google Maps?") == "Yes":
+                        webbrowser.open(open_in_maps_url)
+                else:
+                    sg.popup("A imagem não possui informações de GPS.")
+            else:
+                sg.popup("A imagem não possui dados EXIF.")
+        else:
+            sg.popup("Nenhuma imagem aberta.")
+    except Exception as e:
+        sg.popup(f"Erro ao ler dados de GPS: {str(e)}")
+
+layout = [
+    [sg.Menu([
+            ['Arquivo', ['Abrir', 'Abrir URL', 'Salvar', 'Fechar']],
+            ['EXIF', ['Mostrar dados da imagem', 'Mostrar dados de GPS']], 
+            ['Sobre a image', ['Informacoes']], 
+            ['Sobre', ['Desenvolvedor']],
+            ['Negativo',['Abrir negativo']],
+            ['Sepia', ['Abrir sepia']]
+        ])],
+    [sg.Image(key='-IMAGE-', size=(800, 600))],
+]
+
+window = sg.Window('Photo Shoping', layout, finalize=True)
 
 while True:
-    event, values =  window.read()
+    event, values = window.read()
 
-    if event == sg.WIN_CLOSED:
+    if event in (sg.WINDOW_CLOSED, 'Fechar'):
         break
-    elif event == 'abrir':
-        file_path  = sg.popup_get_file('selecione uma imagem', file_types=(("Imagens", "*.jpg *.png"),))
-        if file_path:
-          resize_img = resize_image(file_path)
-          img_bytes = io.BytesIO()
-          resize_img.save(img_bytes, format="PNG")
-          window['-IMAGE-'].update(data=img_bytes.getvalue())
-    
-    elif event == "Mostrar dados da Imagem" and image_original != None:
-        nome = image_original.filename
-        dimensao = [image_original.width, image_original.height]
-        formato = image_original.format
-        sg.popup(nome, dimensao, formato )
-    elif event == "Mostrar dados de GPS" and image_original != None:
-        webbrowser.open(converter_coordenada(image_original))
-    elif event == 'sobre':
-        sg.popup('Desenvolvido por Pedro Henrique Gomes')
-    elif event == 'fechar':
-        window['-IMAGE-'].update()
+    elif event == 'Abrir':
+        arquivo = sg.popup_get_file('Selecionar image', file_types=(("Imagens", "*.png;*.jpg;*.jpeg;*.gif"),))
+        if arquivo:
+            open_image(arquivo)
+    elif event == 'Abrir URL':
+        url = sg.popup_get_text("Digite a url")
+        if url:
+            url_download(url)
+    elif event == 'Salvar':
+        if image_atual:
+            arquivo = sg.popup_get_file('Salvar image como', save_as=True, file_types=(("Imagens", "*.png;*.jpg;*.jpeg;*.gif"),))
+            if arquivo:
+                save_image(arquivo)
+    elif event == 'Informacoes':
+        info_image()
+    elif event == 'Mostrar dados da imagem':
+        exif_data()
+    elif event == 'Mostrar dados de GPS':
+        gps_data()
+    elif event == 'Desenvolvedor':
+        sg.popup('Desenvolvido por [Seu Nome] - BCC 6º Semestre')
+    elif event == 'Abrir negativo' and image_atual != None:
+        negativo() 
+    elif event == 'Abrir sepia' and image_atual != None:
+        sepia()
 
-window.close
+window.close()
