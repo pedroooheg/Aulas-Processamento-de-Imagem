@@ -1,5 +1,5 @@
 import FreeSimpleGUI as sg
-from PIL import Image, ExifTags
+from PIL import Image, ExifTags, ImageFilter, ImageDraw
 import io
 import os
 import webbrowser
@@ -10,8 +10,151 @@ image_path = None
 imagem_anterior= None
 
 
+def show_histogram_rgb():
+    global image_atual
+    try:
+        if not image_atual:
+            sg.popup("Nenhuma imagem aberta.")
+            return
+
+        #Garante que a imagem em RGB
+        img_rgb = image_atual.convert('RGB')
+        hist = img_rgb.histogram()
+
+        r = hist[0:256]
+        g = hist[256:512]
+        b = hist[512:768]
+
+        #Normaliza para caber na altura do gráfico
+        width, height = 256, 200
+        margin = 10
+        max_count = max(max(r), max(g), max(b), 1)
+
+        hist_img = Image.new('RGB', (width, height), 'black')
+        draw = ImageDraw.Draw(hist_img)
+
+        for x in range(256):
+            rh = int((r[x] / max_count) * (height - margin))
+            gh = int((g[x] / max_count) * (height - margin))
+            bh = int((b[x] / max_count) * (height - margin))
+
+            #Desenha linhas verticais sobrepostas para cada canal
+            draw.line([(x, height - 1), (x, height - 1 - rh)], fill=(255, 0, 0))
+            draw.line([(x, height - 1), (x, height - 1 - gh)], fill=(0, 255, 0))
+            draw.line([(x, height - 1), (x, height - 1 - bh)], fill=(0, 0, 255))
+
+        #Amplia para melhor visualização mantendo aspecto
+        scale_x, scale_y = 3, 2
+        hist_big = hist_img.resize((width * scale_x, height * scale_y), Image.LANCZOS)
+
+        img_bytes = io.BytesIO()
+        hist_big.save(img_bytes, format='PNG')
+
+        layout = [
+            [sg.Image(data=img_bytes.getvalue(), key='-HIST-')],
+            [sg.Button('Fechar')]
+        ]
+        win_hist = sg.Window('Histograma RGB', layout, modal=True, finalize=True)
+        while True:
+            e, _ = win_hist.read()
+            if e in (sg.WINDOW_CLOSED, 'Fechar'):
+                break
+        win_hist.close()
+    except Exception as e:
+        sg.popup(f"Erro ao gerar histograma: {str(e)}")
+
+
+def desfazer():
+    global image_atual
+    if imagem_anterior is not None:
+        image_atual = imagem_anterior.copy()
+    show_image()
+
+
+def apply_blur_filter():
+    global image_atual
+    global imagem_anterior
+    
+    radius = sg.popup_get_text("Digite a quantidade de blur (0 a 20)", default_text='2')
+    try:
+        radius = int(radius)
+        radius = max(0, min(20, radius))
+    except ValueError:
+        sg.popup('Por favor, insira um valor numérico valido')
+        return
+    try:
+        if  image_atual:
+            imagem_anterior = image_atual.copy()
+            image_atual = image_atual.filter(ImageFilter.GaussianBlur(radius))
+            show_image()
+    except Exception as e:
+        sg.popup(f'Erro ao aplicar o filtro:{str(e)}')
+
+
+def four_bits():
+    global image_atual
+    global imagem_anterior
+    try:
+        if image_atual:
+            imagem_anterior = image_atual.copy()
+            image_atual = image_atual.convert('P', palette=Image.ADAPTIVE, colors=4)
+            show_image()
+        else:
+            sg.popup('Nenhuma imagem aberta')
+    except Exception as e:
+        sg.popup(f'Erro ao aplicar o filtro:{str(e)}')
+
+
+def espelhar():
+    global image_atual
+    global imagem_anterior
+    imagem_anterior = image_atual.copy()
+    largura, altura = image_atual.size
+    nova_imagem = Image.new(image_atual.mode, (largura, altura))
+    pixels_original = image_atual.load()
+    pixels_novo = nova_imagem.load()
+    for h in range(altura):
+        for w in range(largura):
+            pixels_novo[w, h] = pixels_original[largura - 1 - w, h]
+    image_atual = nova_imagem
+    show_image()
+
+def pb():
+    global image_atual
+    global imagem_anterior
+    imagem_anterior = image_atual.copy()
+    imagem = image_atual.load()
+    largura, altura = image_atual.size
+    formato = image_atual.format.upper()
+    print(formato)
+    if formato == "JPG" or formato == "JPEG":
+        for h in range(altura):
+            for w in range(largura):
+                color = image_atual.getpixel((w, h))
+                r = int((float(color[0]) * 0.3))
+                g = int((float(color[1]) * 0.59))
+                b = int((float(color[2]) * 0.11))
+
+                imagem[w, h] =(int(r) + int(g) + int(b),
+                               int(r) + int(g) + int(b),
+                               int(r) + int(g) + int(b))
+        show_image()            
+    if formato == "PNG":
+        for h in range(altura):
+            for w in range(largura):
+                color = image_atual.getpixel((w, h))
+                r = int((float(color[0]) * 0.3))
+                g = int((float(color[1]) * 0.59))
+                b = int((float(color[2]) * 0.11))
+                imagem[w, h] = (int(r) + int(g) + int(b),
+                                int(r) + int(g) + int(b),
+                                int(r) + int(g) + int(b))
+        show_image()
+
 def sepia():
     global image_atual
+    global imagem_anterior
+    imagem_anterior = image_atual.copy()
     imagem = image_atual.load()
     largura, altura = image_atual.size
     formato = image_atual.format.upper()
@@ -41,6 +184,8 @@ def sepia():
 
 def negativo():
     global image_atual
+    global imagem_anterior
+    imagem_anterior = image_atual.copy()
     imagem = image_atual.load()
     largura, altura = image_atual.size
     formato = image_atual.format.upper()
@@ -175,11 +320,19 @@ def gps_data():
 layout = [
     [sg.Menu([
             ['Arquivo', ['Abrir', 'Abrir URL', 'Salvar', 'Fechar']],
+            ['Editar', ['Desfazer']],
+            ['Imagem',[
+                'Girar',['Girar 90 graus à direita', 'Girar 90 graus á esquerda', 'Espelhar'],
+                'Filtro',['Preto e Branco', 'Sépia', 'Negativo', '4 bits', 
+                          'Blur', 'Contorno', 'Detalhe', 'Realce de borda',
+                          'Relevo', 'Detector borda', 'Nitidez', 'Suavizar',
+                          'Filtro minimo', 'Filtro máximo'],
+                'Histograma RGB'    
+            ]],
             ['EXIF', ['Mostrar dados da imagem', 'Mostrar dados de GPS']], 
             ['Sobre a image', ['Informacoes']], 
             ['Sobre', ['Desenvolvedor']],
-            ['Negativo',['Abrir negativo']],
-            ['Sepia', ['Abrir sepia']]
+
         ])],
     [sg.Image(key='-IMAGE-', size=(800, 600))],
 ]
@@ -212,9 +365,20 @@ while True:
         gps_data()
     elif event == 'Desenvolvedor':
         sg.popup('Desenvolvido por [Seu Nome] - BCC 6º Semestre')
-    elif event == 'Abrir negativo' and image_atual != None:
+    elif event == 'Negativo' and image_atual != None:
         negativo() 
-    elif event == 'Abrir sepia' and image_atual != None:
+    elif event == 'Sépia' and image_atual != None:
         sepia()
-
+    elif event == 'Preto e Branco' and image_atual != None:
+        pb()
+    elif event == 'Espelhar' and image_atual != None:
+        espelhar()
+    elif event == '4 bits' and image_atual != None:
+        four_bits()
+    elif event == 'Blur' and image_atual != None:
+        apply_blur_filter()
+    elif event == 'Desfazer' and image_atual != None:
+        desfazer()
+    elif event == 'Histograma RGB' and image_atual != None:
+        show_histogram_rgb()
 window.close()
